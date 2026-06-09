@@ -1,0 +1,6 @@
+theme = "auto"           # dark | light | auto
+parallel_workers = 8
+ping_count = 100
+test_duration_secs = 10
+preferred_server = ""    # server ID or empty for auto
+export_on_complete = ""  # json | csv | png | ""

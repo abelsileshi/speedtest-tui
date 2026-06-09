@@ -1,0 +1,41 @@
+# ── Rust build artefacts ──────────────────────────────────────────
+/target/
+**/*.rs.bk
+*.pdb
+
+# ── Cargo lock (keep for binaries, ignore for libs) ──────────────
+# This is a binary crate, so Cargo.lock IS committed.
+# Remove the next line if you ever convert to a library crate.
+# Cargo.lock
+
+# ── Editor / IDE ──────────────────────────────────────────────────
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ── Environment & secrets ─────────────────────────────────────────
+.env
+.env.*
+*.key
+*.pem
+
+# ── Test / debug artefacts ────────────────────────────────────────
+debug.log
+*.log
+/tmp/
+
+# ── Export output files (generated at runtime) ────────────────────
+speedtest-result.json
+speedtest-results.csv
+
+# ── OS-specific ───────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Desktop.ini
+$RECYCLE.BIN/
