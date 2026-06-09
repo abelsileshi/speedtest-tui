@@ -1,157 +1,162 @@
-# .github/workflows/release.yml
-#
-# Triggered whenever you push a tag like v0.1.0
-# Builds speedtest-tui for 5 platforms, then creates a GitHub Release
-# with all binaries attached as downloadable assets.
-#
-# Required: no secrets needed — uses the built-in GITHUB_TOKEN.
-
 name: Release
 
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'   # e.g. v0.1.0, v1.2.3
+      - 'v*.*.*'
+
+permissions:
+  contents: write
 
 env:
   BINARY_NAME: speedtest-tui
   CARGO_TERM_COLOR: always
 
 jobs:
-  # ────────────────────────────────────────────────────────────────
-  # Build matrix — one job per target platform
-  # ────────────────────────────────────────────────────────────────
   build:
-    name: Build — ${{ matrix.target }}
+    name: Build ${{ matrix.asset_name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux x86_64
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
             asset_name: speedtest-tui-linux-x86_64
-            archive: tar.gz
+            archive_ext: tar.gz
+            binary_path: target/x86_64-unknown-linux-gnu/release/speedtest-tui
+            use_cross: false
 
-          # Linux ARM64 (Raspberry Pi 4, etc.)
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-22.04
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
             asset_name: speedtest-tui-linux-aarch64
-            archive: tar.gz
-            cross: true          # uses cross-rs for cross-compilation
+            archive_ext: tar.gz
+            binary_path: target/aarch64-unknown-linux-gnu/release/speedtest-tui
+            use_cross: true
 
-          # macOS Apple Silicon (M1/M2/M3)
-          - target: aarch64-apple-darwin
-            os: macos-14
+          - os: macos-14
+            target: aarch64-apple-darwin
             asset_name: speedtest-tui-macos-aarch64
-            archive: tar.gz
+            archive_ext: tar.gz
+            binary_path: target/aarch64-apple-darwin/release/speedtest-tui
+            use_cross: false
 
-          # macOS Intel
-          - target: x86_64-apple-darwin
-            os: macos-13
+          - os: macos-13
+            target: x86_64-apple-darwin
             asset_name: speedtest-tui-macos-x86_64
-            archive: tar.gz
+            archive_ext: tar.gz
+            binary_path: target/x86_64-apple-darwin/release/speedtest-tui
+            use_cross: false
 
-          # Windows x86_64
-          - target: x86_64-pc-windows-msvc
-            os: windows-2022
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
             asset_name: speedtest-tui-windows-x86_64
-            archive: zip
+            archive_ext: zip
+            binary_path: target/x86_64-pc-windows-msvc/release/speedtest-tui.exe
+            use_cross: false
 
     steps:
-      # ── 1. Check out source ──────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Install Rust toolchain ────────────────────────────────
-      - name: Install Rust
+      - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
 
-      # ── 3. Cache Cargo registry + build artefacts ────────────────
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
 
-      # ── 4. Install cross (ARM64 Linux only) ──────────────────────
       - name: Install cross
-        if: matrix.cross == true
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        if: matrix.use_cross
+        run: cargo install cross --locked
 
-      # ── 5. Build release binary ──────────────────────────────────
       - name: Build (native)
-        if: matrix.cross != true
+        if: ${{ !matrix.use_cross }}
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Build (cross)
-        if: matrix.cross == true
+        if: matrix.use_cross
         run: cross build --release --target ${{ matrix.target }}
 
-      # ── 6. Package into archive ──────────────────────────────────
-      - name: Package (tar.gz — Linux / macOS)
-        if: matrix.archive == 'tar.gz'
+      - name: Verify binary exists (Unix)
+        if: runner.os != 'Windows'
         run: |
-          BINARY=target/${{ matrix.target }}/release/${{ env.BINARY_NAME }}
-          chmod +x "$BINARY"
-          tar -czf ${{ matrix.asset_name }}.tar.gz \
-            -C target/${{ matrix.target }}/release \
-            ${{ env.BINARY_NAME }} \
-            -C ${{ github.workspace }} \
-            README.md LICENSE
+          ls -lh ${{ matrix.binary_path }}
+          test -f ${{ matrix.binary_path }}
 
-      - name: Package (zip — Windows)
-        if: matrix.archive == 'zip'
+      - name: Verify binary exists (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $src = "target\${{ matrix.target }}\release\${{ env.BINARY_NAME }}.exe"
-          Compress-Archive -Path $src, README.md, LICENSE `
-            -DestinationPath "${{ matrix.asset_name }}.zip"
+          Get-Item "${{ matrix.binary_path }}"
 
-      # ── 7. Upload archive as workflow artefact ───────────────────
-      #    (collected by the next job to attach to the GitHub Release)
-      - name: Upload artefact
+      - name: Prepare package directory (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          rm -rf package
+          mkdir -p package
+          cp "${{ matrix.binary_path }}" "package/${{ env.BINARY_NAME }}"
+          chmod +x "package/${{ env.BINARY_NAME }}"
+          cp README.md package/
+          if [ -f LICENSE ]; then cp LICENSE package/; fi
+
+      - name: Create tar.gz archive
+        if: matrix.archive_ext == 'tar.gz'
+        run: |
+          tar -czf "${{ matrix.asset_name }}.tar.gz" -C package .
+          ls -lh "${{ matrix.asset_name }}.tar.gz"
+
+      - name: Prepare package directory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path package) { Remove-Item package -Recurse -Force }
+          New-Item -ItemType Directory -Path package | Out-Null
+          Copy-Item "${{ matrix.binary_path }}" "package\${{ env.BINARY_NAME }}.exe"
+          Copy-Item README.md package\
+          if (Test-Path LICENSE) { Copy-Item LICENSE package\ }
+
+      - name: Create zip archive
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          if (Test-Path "${{ matrix.asset_name }}.zip") { Remove-Item "${{ matrix.asset_name }}.zip" -Force }
+          Compress-Archive -Path package\* -DestinationPath "${{ matrix.asset_name }}.zip"
+          Get-Item "${{ matrix.asset_name }}.zip"
+
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset_name }}
-          path: ${{ matrix.asset_name }}.${{ matrix.archive }}
+          path: ${{ matrix.asset_name }}.${{ matrix.archive_ext }}
+          if-no-files-found: error
           retention-days: 1
 
-  # ────────────────────────────────────────────────────────────────
-  # Create GitHub Release and attach all built archives
-  # ────────────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-22.04
-    permissions:
-      contents: write   # needed to create releases and upload assets
 
     steps:
-      - name: Checkout (for release notes)
-        uses: actions/checkout@v4
-
-      # Download all archives produced by the build matrix
-      - name: Download all artefacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          path: dist/
+          path: dist
           merge-multiple: true
 
-      - name: List dist/
-        run: ls -lh dist/
+      - name: Show release assets
+        run: ls -lh dist
 
-      # Create the release; body is auto-generated from the tag annotation.
-      # Add a CHANGELOG.md or edit the `body` field for custom release notes.
-      - name: Create Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "speedtest-tui ${{ github.ref_name }}"
+          name: speedtest-tui ${{ github.ref_name }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}  # v1.0.0-beta → pre-release
-          generate_release_notes: true   # auto-generates changelog from merged PRs/commits
-          files: dist/**
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
