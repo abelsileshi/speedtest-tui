@@ -12,6 +12,10 @@ A professional-grade, fully async **internet speed test** that runs entirely in 
 ⚡ speedtest-tui — download · upload · latency · jitter · packet loss
 ```
 
+## Screenshot
+
+![speedtest-tui TUI showing a completed test with download 13.55 Mbps, upload 7.78 Mbps, latency 201ms, jitter 4.8ms, quality grade C, ISP HostRoyale Technologies, server Cloudflare, location Detroit United States](docs/tui-screenshot.png)
+
 ---
 
 ## Table of Contents
