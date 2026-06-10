@@ -84,22 +84,4 @@ impl ThemeColors {
             },
         }
     }
-
-    pub fn latency_color(&self, ms: f64) -> Color {
-        if ms < 20.0       { self.accent_green }
-        else if ms < 50.0  { self.accent_teal }
-        else if ms < 100.0 { self.accent_yellow }
-        else if ms < 200.0 { Color::Rgb(255, 160, 45) }
-        else               { self.accent_red }
-    }
-
-    pub fn quality_color(&self, grade: &str) -> Color {
-        match grade {
-            "S" => self.accent_green,
-            "A" => self.accent_teal,
-            "B" => self.accent_yellow,
-            "C" => Color::Rgb(255, 160, 45),
-            _   => self.accent_red,
-        }
-    }
 }

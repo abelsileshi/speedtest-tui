@@ -2,9 +2,8 @@ use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
-    symbols,
     text::{Line, Span},
-    widgets::{Axis, Block, Borders, Chart, Clear, Dataset, GraphType, Paragraph, Widget},
+    widgets::{Block, Borders, Clear, Paragraph, Widget},
     Frame,
 };
 use crate::app::state::{AppState, Phase, WorkerState, DASHBOARD_HISTORY_WINDOW};
@@ -218,9 +217,25 @@ fn render_hero_panel(buf: &mut Buffer, area: Rect, state: &AppState, c: &ThemeCo
         ])
         .split(area);
 
-    render_worker_panel(buf, cols[0], "▼  DOWNLOAD", &state.download.workers, c.dl_primary, c.dl_dim, c);
+    render_worker_panel(
+        buf,
+        cols[0],
+        "▼  DOWNLOAD",
+        &state.download.workers,
+        c.dl_primary,
+        c.dl_dim,
+        c,
+    );
     render_center_readout(buf, cols[2], state, c);
-    render_worker_panel(buf, cols[4], "▲  UPLOAD",   &state.upload.workers,   c.ul_primary, c.ul_dim, c);
+    render_worker_panel(
+        buf,
+        cols[4],
+        "▲  UPLOAD",
+        &state.upload.workers,
+        c.ul_primary,
+        c.ul_dim,
+        c,
+    );
 }
 
 fn render_worker_panel(
@@ -249,8 +264,8 @@ fn render_worker_panel(
 
     let w_count = workers.iter().filter(|w| w.active).count();
     let agg: f64 = workers.iter().map(|w| w.speed_mbps).sum();
-    pxc(buf, area.x, agg_y, area.width, &format!("{} active workers", w_count), c.text_faint, Modifier::empty());
-    pxc(buf, area.x, stat_y, area.width, &format!("{:.1} Mbps total", agg), color, Modifier::BOLD);
+    pxc(buf, area.x, agg_y, area.width, &format!("{} workers", w_count), c.text_faint, Modifier::empty());
+    pxc(buf, area.x, stat_y, area.width, &format!("{:.1} Mbps", agg), color, Modifier::BOLD);
 }
 
 fn draw_worker_bars(
@@ -283,6 +298,7 @@ fn draw_worker_bars(
     let total_w = n as u16 * bw + n.saturating_sub(1) as u16 * gap;
     let x0      = area.x + area.width.saturating_sub(total_w) / 2;
     let max_spd = workers.iter().map(|w| w.speed_mbps).fold(0.1f64, f64::max);
+    let drawable_h = h.saturating_sub(1).max(1);
 
     for i in 0..n {
         let spd      = workers.get(i).map(|w| w.speed_mbps).unwrap_or(0.0);
@@ -290,7 +306,11 @@ fn draw_worker_bars(
         let complete = workers.get(i).map(|w| w.complete).unwrap_or(false);
 
         let ratio  = (spd / max_spd).clamp(0.0, 1.0);
-        let filled = ((ratio * h as f64).round() as usize).max(if spd > 0.0 { 1 } else { 0 });
+        let filled = if spd > 0.0 {
+            ((ratio * drawable_h as f64).ceil() as usize).clamp(1, drawable_h)
+        } else {
+            0
+        };
         let bar_col = if complete { dim } else if active { color } else { c.text_faint };
 
         let bx = x0 + i as u16 * (bw + gap);
@@ -301,7 +321,7 @@ fn draw_worker_bars(
                 if x >= area.x + area.width { continue; }
                 if row < filled {
                     let ch = if row == filled.saturating_sub(1) && ratio < 1.0 {
-                        frac_block((ratio * h as f64) - (filled as f64 - 1.0))
+                        frac_block((ratio * drawable_h as f64) - (filled as f64 - 1.0))
                     } else { '█' };
                     buf[(x, y)].set_char(ch).set_fg(bar_col);
                 } else if (i + row) % 4 == 0 {
@@ -340,20 +360,34 @@ fn render_center_readout(buf: &mut Buffer, area: Rect, state: &AppState, c: &The
         draw_hrule(buf, inner.x, ul_area.y, inner.width, c.divider);
     }
 
-    pxr(buf, dl_area.x, dl_area.y, dl_area.width,
-        &format!("peak {:.1}", state.download.peak_mbps), c.text_muted, Modifier::empty());
     draw_block_speed(
         buf,
-        Rect { x: dl_area.x, y: dl_area.y + 1, width: dl_area.width, height: dl_area.height.saturating_sub(1) },
+        Rect { x: dl_area.x, y: dl_area.y, width: dl_area.width, height: dl_area.height },
         state.download.current_mbps, c.dl_primary,
     );
+    pxr(
+        buf,
+        dl_area.x,
+        dl_area.y + dl_area.height / 2,
+        dl_area.width,
+        &format!("peak {:.1}", state.download.peak_mbps),
+        c.text_muted,
+        Modifier::empty(),
+    );
 
-    pxr(buf, ul_area.x, ul_area.y, ul_area.width,
-        &format!("peak {:.1}", state.upload.peak_mbps), c.text_muted, Modifier::empty());
     draw_block_speed(
         buf,
-        Rect { x: ul_area.x, y: ul_area.y + 1, width: ul_area.width, height: ul_area.height.saturating_sub(1) },
+        Rect { x: ul_area.x, y: ul_area.y, width: ul_area.width, height: ul_area.height },
         state.upload.current_mbps, c.ul_primary,
+    );
+    pxr(
+        buf,
+        ul_area.x,
+        ul_area.y + ul_area.height / 2,
+        ul_area.width,
+        &format!("peak {:.1}", state.upload.peak_mbps),
+        c.text_muted,
+        Modifier::empty(),
     );
 }
 
@@ -414,93 +448,95 @@ fn render_history_graph(buf: &mut Buffer, area: Rect, state: &AppState, c: &Them
     let end = start + window_len;
     let visible = &state.history[start..end];
 
-    let dl_data: Vec<(f64, f64)> = visible.iter()
-        .enumerate()
-        .map(|(i, r)| (i as f64, r.download_mbps))
-        .collect();
-    let ul_data: Vec<(f64, f64)> = visible.iter()
-        .enumerate()
-        .map(|(i, r)| (i as f64, r.upload_mbps))
-        .collect();
-    let ping_data: Vec<(f64, f64)> = visible.iter()
-        .enumerate()
-        .map(|(i, r)| (i as f64, r.ping_ms / 10.0))
-        .collect();
+    let dl_values: Vec<f64> = visible.iter().map(|r| r.download_mbps).collect();
+    let ul_values: Vec<f64> = visible.iter().map(|r| r.upload_mbps).collect();
+    let ping_values: Vec<f64> = visible.iter().map(|r| r.ping_ms).collect();
 
-    let max_dl = dl_data.iter().map(|d| d.1).fold(1.0f64, f64::max);
-    let max_ul = ul_data.iter().map(|d| d.1).fold(1.0f64, f64::max);
-    let y_max  = (max_dl.max(max_ul) * 1.25).max(10.0);
-
-    let chart_block = Block::default()
-        .borders(Borders::NONE)
-        .style(Style::default().bg(c.nav_bg));
-    let chart_area = chart_block.inner(shrink(card, 1));
+    let chart_area = shrink(card, 1);
+    if chart_area.width < 26 || chart_area.height < 8 {
+        return;
+    }
     fill_rect(buf, chart_area, c.nav_bg);
-    let chart_style = Style::default().bg(c.nav_bg);
-    if chart_area.height < 3 {
+
+    let header_y = chart_area.y;
+    let x_axis_y = chart_area.y + chart_area.height - 2;
+    let footer_y = chart_area.y + chart_area.height - 1;
+    let left_axis_w = 8u16;
+    let right_axis_w = 8u16;
+    if chart_area.width <= left_axis_w + right_axis_w + 6 {
         return;
     }
 
-    let plot_area = Rect {
-        x: chart_area.x,
-        y: chart_area.y,
-        width: chart_area.width,
-        height: chart_area.height.saturating_sub(1),
+    let plot_frame = Rect {
+        x: chart_area.x + left_axis_w,
+        y: chart_area.y + 1,
+        width: chart_area.width - left_axis_w - right_axis_w,
+        height: chart_area.height.saturating_sub(3),
     };
-    let left_label = if start == 0 {
+    if plot_frame.width < 6 || plot_frame.height < 4 {
+        return;
+    }
+    let canvas = Rect {
+        x: plot_frame.x + 1,
+        y: plot_frame.y,
+        width: plot_frame.width.saturating_sub(2),
+        height: plot_frame.height.saturating_sub(1),
+    };
+    if canvas.width < 4 || canvas.height < 3 {
+        return;
+    }
+    fill_rect(buf, canvas, c.nav_bg);
+
+    let (throughput_min, throughput_max) = throughput_bounds(&dl_values, &ul_values);
+    let (ping_min, ping_max) = ping_bounds(&ping_values);
+    let left_labels = axis_triplet(throughput_min, throughput_max);
+    let right_labels = axis_triplet(ping_min, ping_max);
+
+    let mid_grid_y = canvas.y + canvas.height / 2;
+    let bottom_axis_y = canvas.y + canvas.height - 1;
+    draw_hrule(buf, canvas.x, mid_grid_y, canvas.width, c.divider);
+    draw_hrule(buf, canvas.x, bottom_axis_y, canvas.width, c.divider);
+    draw_vrule(buf, canvas.x, canvas.y, canvas.height, c.divider);
+    for y in canvas.y..canvas.y + canvas.height {
+        buf[(canvas.x + canvas.width - 1, y)].set_char('│').set_fg(c.text_faint);
+    }
+    buf[(canvas.x, bottom_axis_y)].set_char('└').set_fg(c.divider);
+    buf[(canvas.x + canvas.width - 1, bottom_axis_y)]
+        .set_char('┘')
+        .set_fg(c.text_faint);
+
+    draw_history_legend(
+        buf,
+        Rect { x: chart_area.x + left_axis_w, y: header_y, width: chart_area.width - left_axis_w - right_axis_w, height: 1 },
+        c,
+    );
+
+    let left_axis_area = Rect { x: chart_area.x, y: canvas.y, width: left_axis_w, height: canvas.height };
+    let right_axis_area = Rect { x: canvas.x + canvas.width + 1, y: canvas.y, width: right_axis_w.saturating_sub(1), height: canvas.height };
+    draw_axis_labels(buf, left_axis_area, c, &left_labels, false, Some("Mbps"));
+    draw_axis_labels(buf, right_axis_area, c, &right_labels, true, Some("ms"));
+
+    draw_series(buf, canvas, &dl_values, throughput_min, throughput_max, c.dl_primary);
+    draw_series(buf, canvas, &ul_values, throughput_min, throughput_max, c.ul_primary);
+    draw_series(buf, canvas, &ping_values, ping_min, ping_max, c.accent_green);
+
+    let left_x_label = if start == 0 {
         "oldest".to_string()
     } else {
         format!("#{}", start + 1)
     };
-    let right_label = if end >= n {
+    let right_x_label = if end >= n {
         "newest".to_string()
     } else {
         format!("#{} →", end)
     };
+    px(buf, plot_frame.x, x_axis_y, &left_x_label, c.text_faint, Modifier::empty());
+    pxr(buf, plot_frame.x, x_axis_y, plot_frame.width, &right_x_label, c.text_muted, Modifier::empty());
 
-    let chart = Chart::new(vec![
-        Dataset::default().name("▼ DL")
-            .marker(symbols::Marker::Dot).graph_type(GraphType::Line)
-            .style(chart_style.fg(c.dl_primary)).data(&dl_data),
-        Dataset::default().name("▲ UL")
-            .marker(symbols::Marker::Dot).graph_type(GraphType::Line)
-            .style(chart_style.fg(c.ul_primary)).data(&ul_data),
-        Dataset::default().name("Ping÷10")
-            .marker(symbols::Marker::Dot).graph_type(GraphType::Scatter)
-            .style(chart_style.fg(c.accent_green)).data(&ping_data),
-    ])
-    .block(chart_block)
-    .style(chart_style)
-    .x_axis(Axis::default().bounds([0.0, window_len.saturating_sub(1).max(1) as f64])
-        .style(chart_style.fg(c.text_faint))
-        .labels(vec![
-            Span::styled(left_label,  chart_style.fg(c.text_faint)),
-            Span::styled(right_label, chart_style.fg(c.text_muted)),
-        ]))
-    .y_axis(Axis::default().bounds([0.0, y_max])
-        .style(chart_style.fg(c.text_faint))
-        .labels(vec![
-            Span::styled("0",                   chart_style.fg(c.text_faint)),
-            Span::styled(format!("{:.0}", y_max / 2.0), chart_style.fg(c.text_muted)),
-            Span::styled(format!("{:.0}", y_max),       chart_style.fg(c.text_muted)),
-        ]));
-
-    chart.render(plot_area, buf);
-
-    let footer_y = chart_area.y + chart_area.height - 1;
-    let verbose = format!(
-        "{}-{} of {}  [← older] [→ newer] [Home oldest] [End newest]",
-        start + 1,
-        end,
-        n
-    );
+    let verbose = format!("{}-{} of {}  [← older] [→ newer]", start + 1, end, n);
     let compact = format!("{}-{} of {}", start + 1, end, n);
-    let footer = if verbose.len() as u16 <= chart_area.width {
-        verbose.as_str()
-    } else {
-        compact.as_str()
-    };
-    px(buf, chart_area.x, footer_y, footer, c.text_muted, Modifier::empty());
+    let footer = if verbose.len() as u16 <= chart_area.width { verbose.as_str() } else { compact.as_str() };
+    pxc(buf, plot_frame.x, footer_y, plot_frame.width, footer, c.text_muted, Modifier::empty());
 }
 
 fn render_server_card(buf: &mut Buffer, area: Rect, state: &AppState, c: &ThemeColors) {
@@ -536,17 +572,18 @@ fn render_server_card(buf: &mut Buffer, area: Rect, state: &AppState, c: &ThemeC
             }
         });
     let isp = if state.ip_info.isp.is_empty() {
-        "Unavailable".to_string()
+        "Unknown ISP".to_string()
     } else {
         state.ip_info.isp.clone()
     };
     let ip = if state.ip_info.ip.is_empty() {
-        "Unavailable".to_string()
+        "Unknown".to_string()
     } else {
         state.ip_info.ip.clone()
     };
 
-    let lat_col = c.latency_color(state.latency.avg_ms);
+    let ping_ms = effective_ping_ms(state);
+    let lat_col = server_ping_color(c, ping_ms);
     let loss_col = if state.latency.packet_loss_pct == 0.0 {
         c.accent_green
     } else if state.latency.packet_loss_pct < 2.0 {
@@ -556,7 +593,7 @@ fn render_server_card(buf: &mut Buffer, area: Rect, state: &AppState, c: &ThemeC
     };
 
     let (score, grade) = state.compute_quality_score();
-    let grade_col = c.quality_color(&grade);
+    let grade_col = server_grade_color(c, &grade);
 
     let card = Rect {
         x: inner.x + 1,
@@ -587,7 +624,7 @@ fn render_server_card(buf: &mut Buffer, area: Rect, state: &AppState, c: &ThemeC
         ("IP", ip, c.accent_teal, Modifier::empty()),
         ("SERVER", server_name.to_string(), c.text, Modifier::BOLD),
         ("LOCATION", server_location.to_string(), c.text_muted, Modifier::empty()),
-        ("LATENCY", format!("{:.0} ms", state.latency.avg_ms), lat_col, Modifier::BOLD),
+        ("PING", format!("{:.0} ms", ping_ms), lat_col, Modifier::BOLD),
         ("JITTER", format!("{:.1} ms", state.latency.jitter_ms), c.text, Modifier::empty()),
         ("PKT LOSS", format!("{:.1}%", state.latency.packet_loss_pct), loss_col, Modifier::BOLD),
     ];
@@ -604,16 +641,21 @@ fn render_server_card(buf: &mut Buffer, area: Rect, state: &AppState, c: &ThemeC
     let quality_y = table.y + table.height.saturating_sub(2);
     if quality_y > body_top && quality_y < table.y + table.height {
         draw_hrule(buf, table.x, quality_y - 1, table.width, c.divider);
-        let stars = format!(
-            "{}{}",
-            "★".repeat(score.round() as usize),
-            "☆".repeat(5usize.saturating_sub(score.round() as usize))
-        );
+        let filled_stars = "★".repeat(score.round() as usize);
+        let empty_stars = "☆".repeat(5usize.saturating_sub(score.round() as usize));
         px(buf, table.x + 1, quality_y, "QUALITY", c.text_faint, Modifier::BOLD);
-        px(buf, divider_x + 2, quality_y, &stars, grade_col, Modifier::BOLD);
+        px(buf, divider_x + 2, quality_y, &filled_stars, grade_col, Modifier::BOLD);
         px(
             buf,
-            divider_x + 2 + stars.len() as u16 + 1,
+            divider_x + 2 + filled_stars.len() as u16,
+            quality_y,
+            &empty_stars,
+            c.text_faint,
+            Modifier::BOLD,
+        );
+        px(
+            buf,
+            divider_x + 2 + filled_stars.len() as u16 + empty_stars.len() as u16 + 1,
             quality_y,
             &format!("Grade {}", grade),
             grade_col,
@@ -738,6 +780,218 @@ fn draw_block_speed(buf: &mut Buffer, area: Rect, value: f64, color: Color) {
             buf[(x, y)].set_char(ch).set_fg(color)
                 .set_style(Style::default().add_modifier(Modifier::BOLD));
         }
+    }
+}
+
+fn effective_ping_ms(state: &AppState) -> f64 {
+    if state.latency.avg_ms > 0.0 {
+        state.latency.avg_ms
+    } else {
+        state.servers
+            .get(state.selected_server_idx)
+            .map(|server| server.latency_ms)
+            .filter(|latency| latency.is_finite() && *latency < 9_999.0)
+            .unwrap_or(0.0)
+    }
+}
+
+fn server_ping_color(c: &ThemeColors, ms: f64) -> Color {
+    if ms < 50.0 {
+        c.accent_green
+    } else if ms < 150.0 {
+        c.accent_yellow
+    } else if ms <= 300.0 {
+        Color::Rgb(255, 160, 45)
+    } else {
+        c.accent_red
+    }
+}
+
+fn server_grade_color(c: &ThemeColors, grade: &str) -> Color {
+    match grade {
+        "A" | "B" => c.accent_green,
+        "C" => c.accent_yellow,
+        "D" => Color::Rgb(255, 160, 45),
+        "E" | "F" => c.accent_red,
+        _ => c.text_muted,
+    }
+}
+
+fn throughput_bounds(dl_values: &[f64], ul_values: &[f64]) -> (f64, f64) {
+    let max_val = dl_values
+        .iter()
+        .chain(ul_values.iter())
+        .copied()
+        .fold(0.0f64, f64::max);
+    (0.0, nice_axis_max((max_val * 1.15).max(10.0)))
+}
+
+fn ping_bounds(ping_values: &[f64]) -> (f64, f64) {
+    if ping_values.is_empty() {
+        return (0.0, 50.0);
+    }
+
+    let min_val = ping_values.iter().copied().fold(f64::INFINITY, f64::min);
+    let max_val = ping_values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !min_val.is_finite() || !max_val.is_finite() {
+        return (0.0, 50.0);
+    }
+
+    let span = (max_val - min_val).abs();
+    let pad = (span * 0.18).max(2.0);
+    let min_bound = (min_val - pad).max(0.0);
+    let mut max_bound = max_val + pad;
+    if (max_bound - min_bound) < 5.0 {
+        max_bound = min_bound + 5.0;
+    }
+    (min_bound, nice_axis_max(max_bound))
+}
+
+fn nice_axis_max(value: f64) -> f64 {
+    if value <= 10.0 {
+        value.ceil().max(1.0)
+    } else if value <= 50.0 {
+        (value / 5.0).ceil() * 5.0
+    } else if value <= 100.0 {
+        (value / 10.0).ceil() * 10.0
+    } else {
+        (value / 25.0).ceil() * 25.0
+    }
+}
+
+fn axis_triplet(min: f64, max: f64) -> [f64; 3] {
+    [max, (min + max) / 2.0, min]
+}
+
+fn draw_history_legend(buf: &mut Buffer, area: Rect, c: &ThemeColors) {
+    let items = [("▼ DL", c.dl_primary), ("▲ UL", c.ul_primary), ("● Ping", c.accent_green)];
+    let total_width: u16 = items
+        .iter()
+        .enumerate()
+        .map(|(i, (label, _))| label.len() as u16 + if i > 0 { 2 } else { 0 })
+        .sum();
+    let mut x = area.x + area.width.saturating_sub(total_width) / 2;
+    for (i, (label, color)) in items.iter().enumerate() {
+        if i > 0 {
+            x += 2;
+        }
+        px(buf, x, area.y, label, *color, Modifier::BOLD);
+        x += label.len() as u16;
+    }
+}
+
+fn draw_axis_labels(
+    buf: &mut Buffer,
+    area: Rect,
+    c: &ThemeColors,
+    labels: &[f64; 3],
+    right_aligned: bool,
+    unit_suffix: Option<&str>,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let rows = [area.y, area.y + area.height / 2, area.y + area.height.saturating_sub(1)];
+    for (index, (y, value)) in rows.into_iter().zip(labels.iter()).enumerate() {
+        let text = format_axis_label(*value, if index == 0 { unit_suffix } else { None });
+        if right_aligned {
+            px(buf, area.x, y, &text, c.text_muted, Modifier::empty());
+        } else {
+            pxr(buf, area.x, y, area.width, &text, c.text_muted, Modifier::empty());
+        }
+    }
+}
+
+fn draw_series(
+    buf: &mut Buffer,
+    area: Rect,
+    values: &[f64],
+    min: f64,
+    max: f64,
+    color: Color,
+) {
+    if values.is_empty() || area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let points = series_points(area, values, min, max);
+    for pair in points.windows(2) {
+        let (x0, y0) = pair[0];
+        let (x1, y1) = pair[1];
+        draw_line_segment(buf, x0, y0, x1, y1, color);
+    }
+
+    for (x, y) in points {
+        buf[(x, y)]
+            .set_char('●')
+            .set_fg(color)
+            .set_style(Style::default().fg(color).bg(Color::Reset));
+    }
+}
+
+fn series_points(area: Rect, values: &[f64], min: f64, max: f64) -> Vec<(u16, u16)> {
+    let width = area.width.saturating_sub(1) as f64;
+    let height = area.height.saturating_sub(1) as f64;
+    let span = (max - min).max(1.0);
+
+    values
+        .iter()
+        .enumerate()
+        .map(|(i, value)| {
+            let x = if values.len() <= 1 {
+                area.x + area.width / 2
+            } else {
+                area.x + ((i as f64 / (values.len() - 1) as f64) * width).round() as u16
+            };
+            let ratio = ((*value - min) / span).clamp(0.0, 1.0);
+            let y = area.y + (height - (ratio * height).round()) as u16;
+            (x, y)
+        })
+        .collect()
+}
+
+fn draw_line_segment(buf: &mut Buffer, x0: u16, y0: u16, x1: u16, y1: u16, color: Color) {
+    let (mut x0, mut y0, x1, y1) = (x0 as i32, y0 as i32, x1 as i32, y1 as i32);
+    let dx = (x1 - x0).abs();
+    let sx = if x0 < x1 { 1 } else { -1 };
+    let dy = -(y1 - y0).abs();
+    let sy = if y0 < y1 { 1 } else { -1 };
+    let mut err = dx + dy;
+
+    loop {
+        buf[(x0 as u16, y0 as u16)]
+            .set_char('·')
+            .set_fg(color)
+            .set_style(Style::default().fg(color));
+        if x0 == x1 && y0 == y1 {
+            break;
+        }
+        let e2 = 2 * err;
+        if e2 >= dy {
+            err += dy;
+            x0 += sx;
+        }
+        if e2 <= dx {
+            err += dx;
+            y0 += sy;
+        }
+    }
+}
+
+fn format_axis_label(value: f64, unit_suffix: Option<&str>) -> String {
+    let base = if value >= 100.0 {
+        format!("{:.0}", value)
+    } else if value >= 10.0 {
+        format!("{:.0}", value)
+    } else {
+        format!("{:.1}", value)
+    };
+
+    if let Some(unit) = unit_suffix {
+        format!("{} {}", base, unit)
+    } else {
+        base
     }
 }
 

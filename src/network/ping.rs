@@ -10,13 +10,13 @@ pub async fn run_ping_test(
     count: usize,
     tx: mpsc::Sender<NetworkMsg>,
 ) -> Result<()> {
-    let url = format!("https://{}/favicon.ico", host);
+    let url = format!("https://{}/cdn-cgi/trace", host);
     let mut successes = 0;
 
     for _ in 0..count {
         let start = Instant::now();
         let result = client
-            .head(&url)
+            .get(&url)
             .timeout(std::time::Duration::from_secs(2))
             .send()
             .await;
@@ -31,7 +31,11 @@ pub async fn run_ping_test(
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
-    let _packet_loss = ((count - successes) as f64 / count as f64) * 100.0;
-    let _ = tx.send(NetworkMsg::PingComplete).await;
+    let packet_loss_pct = if count == 0 {
+        0.0
+    } else {
+        ((count - successes) as f64 / count as f64) * 100.0
+    };
+    let _ = tx.send(NetworkMsg::PingComplete { packet_loss_pct }).await;
     Ok(())
 }

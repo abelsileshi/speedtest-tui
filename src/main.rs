@@ -111,8 +111,8 @@ async fn run_single_test(
             }
             Err(_) => {
                 let _ = net_tx.send(NetworkMsg::IpInfoReceived {
-                    ip:       "Unavailable".into(),
-                    isp:      "ISP lookup unavailable".into(),
+                    ip:       "Unknown".into(),
+                    isp:      "Unknown ISP".into(),
                     location: "Unknown location".into(),
                 }).await;
             }
@@ -277,7 +277,17 @@ fn handle_network_msg(state: &mut AppState, msg: NetworkMsg) {
         NetworkMsg::PingSample(ms) => {
             app::metrics::update_latency_stats(&mut state.latency, ms);
         }
-        NetworkMsg::PingComplete => {
+        NetworkMsg::PingComplete { packet_loss_pct } => {
+            state.latency.packet_loss_pct = packet_loss_pct;
+            if state.latency.samples.is_empty() {
+                if let Some(server) = state.servers.get(state.selected_server_idx) {
+                    if server.latency_ms.is_finite() && server.latency_ms < 9_999.0 {
+                        state.latency.avg_ms = server.latency_ms;
+                        state.latency.min_ms = server.latency_ms;
+                        state.latency.max_ms = server.latency_ms;
+                    }
+                }
+            }
             state.phase = Phase::Download;
             state.download.workers = std::iter::repeat_with(|| WorkerState {
                 active: true,
@@ -338,6 +348,7 @@ fn handle_network_msg(state: &mut AppState, msg: NetworkMsg) {
 fn finalize_result(state: &mut AppState) {
     let (score, grade) = state.compute_quality_score();
     let server = state.servers.get(state.selected_server_idx);
+    let ping_ms = display_ping_ms(state);
     let result = app::state::TestResult {
         timestamp:       Some(Utc::now()),
         isp:             state.ip_info.isp.clone(),
@@ -345,7 +356,7 @@ fn finalize_result(state: &mut AppState) {
         location:        state.ip_info.location.clone(),
         server_name:     server.map(|s| s.name.clone()).unwrap_or_default(),
         server_host:     server.map(|s| s.host.clone()).unwrap_or_default(),
-        ping_ms:         state.latency.avg_ms,
+        ping_ms:         ping_ms,
         jitter_ms:       state.latency.jitter_ms,
         packet_loss_pct: state.latency.packet_loss_pct,
         download_mbps:   state.download.avg_mbps,
@@ -358,6 +369,18 @@ fn finalize_result(state: &mut AppState) {
     state.history_graph_follow_newest = true;
     state.result = Some(result);
     state.phase  = Phase::Results;
+}
+
+fn display_ping_ms(state: &AppState) -> f64 {
+    if state.latency.avg_ms > 0.0 {
+        state.latency.avg_ms
+    } else {
+        state.servers
+            .get(state.selected_server_idx)
+            .map(|server| server.latency_ms)
+            .filter(|latency| latency.is_finite() && *latency < 9_999.0)
+            .unwrap_or(0.0)
+    }
 }
 
 async fn run_quiet(cli: &Cli, config: &config::Config) -> Result<()> {

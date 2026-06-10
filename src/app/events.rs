@@ -7,7 +7,9 @@ pub enum NetworkMsg {
     },
     ServersReceived(Vec<crate::app::state::ServerInfo>),
     PingSample(f64),
-    PingComplete,
+    PingComplete {
+        packet_loss_pct: f64,
+    },
     DownloadSample {
         worker_id: usize,
         mbps: f64,
