@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub const DASHBOARD_HISTORY_WINDOW: usize = 36;
+pub const DASHBOARD_HISTORY_STEP: usize = 12;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Phase {
     Init,
@@ -12,7 +15,6 @@ pub enum Phase {
     Results,
     History,
     Help,
-    Error(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -36,9 +38,7 @@ pub struct LatencyStats {
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkerState {
-    pub id: usize,
     pub speed_mbps: f64,
-    pub bytes_transferred: u64,
     pub active: bool,
     pub complete: bool,
 }
@@ -48,10 +48,8 @@ pub struct SpeedStats {
     pub current_mbps: f64,
     pub peak_mbps: f64,
     pub avg_mbps: f64,
-    pub history: Vec<f64>, // rolling 30s
+    pub history: Vec<f64>,
     pub workers: Vec<WorkerState>,
-    pub bytes_total: u64,
-    pub elapsed_secs: f64,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -90,11 +88,11 @@ pub struct AppState {
     pub result: Option<TestResult>,
     pub history: Vec<TestResult>,
     pub history_scroll: usize,
-    pub status_message: String,
+    pub history_graph_start: usize,
+    pub history_graph_follow_newest: bool,
     pub theme: Theme,
     pub skip_upload: bool,
     pub animation_tick: u64,
-    pub ping_progress: f64, // 0.0 to 1.0
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -116,11 +114,11 @@ impl Default for AppState {
             result: None,
             history: Vec::new(),
             history_scroll: 0,
-            status_message: String::new(),
+            history_graph_start: 0,
+            history_graph_follow_newest: true,
             theme: Theme::Dark,
             skip_upload: false,
             animation_tick: 0,
-            ping_progress: 0.0,
         }
     }
 }

@@ -10,7 +10,6 @@ pub struct Config {
     pub ping_count: usize,
     pub test_duration_secs: u64,
     pub preferred_server: String,
-    pub export_on_complete: String,
 }
 
 impl Default for Config {
@@ -21,7 +20,6 @@ impl Default for Config {
             ping_count: 100,
             test_duration_secs: 10,
             preferred_server: String::new(),
-            export_on_complete: String::new(),
         }
     }
 }
@@ -36,17 +34,6 @@ impl Config {
             }
         }
         Ok(Config::default())
-    }
-
-    pub fn save(&self) -> Result<()> {
-        if let Some(path) = config_path() {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            let text = toml::to_string_pretty(self)?;
-            std::fs::write(&path, text)?;
-        }
-        Ok(())
     }
 }
 

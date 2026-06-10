@@ -34,7 +34,6 @@ pub async fn run_download_test(
         let handle = tokio::spawn(async move {
             let _ = tx.send(NetworkMsg::DownloadSample {
                 worker_id,
-                bytes: 0,
                 mbps: 0.0,
                 aggregate_mbps: 0.0,
             }).await;
@@ -81,7 +80,6 @@ pub async fn run_download_test(
 
                         let _ = tx.send(NetworkMsg::DownloadSample {
                             worker_id,
-                            bytes: worker_total,
                             mbps: worker_mbps,
                             aggregate_mbps,
                         }).await;

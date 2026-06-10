@@ -2,77 +2,104 @@ use ratatui::style::Color;
 use crate::app::state::Theme;
 
 pub struct ThemeColors {
-    pub bg:            Color,   // very dark navy/charcoal
-    pub surface:       Color,   // slightly lighter panel bg
-    pub outer_border:  Color,   // blue-purple outer frame
-    pub section_border:Color,   // subtle inner section borders
-    pub border:        Color,   // general borders
-    pub text:          Color,   // primary text (near-white)
-    pub text_muted:    Color,   // secondary labels
-    pub nav_text:      Color,   // nav bar labels (white)
-    pub accent_orange: Color,   // Cloudflare orange (titles, DL)
-    pub accent_blue:   Color,   // keep for compat
-    pub accent_yellow: Color,   // stars
-    pub accent_green:  Color,   // good latency / success
-    pub accent_red:    Color,   // errors
-    pub shortcut:      Color,   // keyboard hints
-    pub header_bg:     Color,
-    pub gauge_filled:  Color,
-    pub gauge_empty:   Color,
+    pub bg:             Color,
+    pub surface:        Color,
+    pub nav_bg:         Color,
+    pub panel_border:   Color,
+    pub divider:        Color,
+    pub text:           Color,
+    pub text_muted:     Color,
+    pub text_faint:     Color,
+    pub nav_key:        Color,
+    pub dl_primary:     Color,
+    pub dl_dim:         Color,
+    pub ul_primary:     Color,
+    pub ul_dim:         Color,
+    pub accent_green:   Color,
+    pub accent_yellow:  Color,
+    pub accent_red:     Color,
+    pub accent_teal:    Color,
+    pub pill_active_bg: Color,
+    pub pill_done_fg:   Color,
+    pub pill_done_bg:   Color,
 }
 
 impl ThemeColors {
     pub fn for_theme(theme: &Theme) -> Self {
         match theme {
             Theme::Dark => Self {
-                // Match the screenshot: very dark navy, orange accents, blue-purple border
-                bg:             Color::Rgb(15,  14,  26),   // #0f0e1a deep navy
-                surface:        Color::Rgb(24,  22,  40),   // slightly lighter
-                outer_border:   Color::Rgb(80,  80,  200),  // blue-purple border
-                section_border: Color::Rgb(55,  52,  80),   // muted purple-grey
-                border:         Color::Rgb(60,  58,  90),
-                text:           Color::Rgb(220, 220, 230),  // near-white
-                text_muted:     Color::Rgb(120, 118, 145),
-                nav_text:       Color::Rgb(230, 228, 240),
-                accent_orange:  Color::Rgb(230, 130, 50),   // #e68232 — screenshot orange
-                accent_blue:    Color::Rgb(80,  150, 230),
-                accent_yellow:  Color::Rgb(240, 195, 60),
-                accent_green:   Color::Rgb(70,  210, 120),
-                accent_red:     Color::Rgb(220, 70,  70),
-                shortcut:       Color::Rgb(100, 140, 200),
-                header_bg:      Color::Rgb(18,  16,  30),
-                gauge_filled:   Color::Rgb(230, 130, 50),
-                gauge_empty:    Color::Rgb(40,  38,  60),
+                bg:             Color::Rgb(13,  12,  22),
+                surface:        Color::Rgb(30,  28,  48),
+                nav_bg:         Color::Rgb(22,  20,  39),
+
+                panel_border:   Color::Rgb(118, 108, 226),
+                divider:        Color::Rgb(92,  88,  128),
+
+                text:           Color::Rgb(235, 235, 245),
+                text_muted:     Color::Rgb(184, 180, 205),
+                text_faint:     Color::Rgb(146, 143, 174),
+                nav_key:        Color::Rgb(255, 210, 80),
+
+                dl_primary:     Color::Rgb(244, 152, 68),
+                dl_dim:         Color::Rgb(132, 82,  38),
+                ul_primary:     Color::Rgb(102, 184, 248),
+                ul_dim:         Color::Rgb(58,  107, 156),
+
+                accent_green:   Color::Rgb(80,  220, 130),
+                accent_yellow:  Color::Rgb(245, 205, 70),
+                accent_red:     Color::Rgb(235, 85,  80),
+                accent_teal:    Color::Rgb(65,  215, 195),
+
+                pill_active_bg: Color::Rgb(210, 110, 25),
+                pill_done_fg:   Color::Rgb(13,  12,  22),
+                pill_done_bg:   Color::Rgb(60,  195, 100),
             },
+
             Theme::Light => Self {
-                bg:             Color::Rgb(250, 248, 255),
-                surface:        Color::Rgb(240, 238, 250),
-                outer_border:   Color::Rgb(80,  80,  200),
-                section_border: Color::Rgb(180, 178, 210),
-                border:         Color::Rgb(190, 188, 215),
-                text:           Color::Rgb(20,  18,  40),
-                text_muted:     Color::Rgb(110, 108, 140),
-                nav_text:       Color::Rgb(30,  28,  55),
-                accent_orange:  Color::Rgb(200, 100, 20),
-                accent_blue:    Color::Rgb(30,  100, 200),
-                accent_yellow:  Color::Rgb(190, 130, 0),
-                accent_green:   Color::Rgb(30,  160, 80),
-                accent_red:     Color::Rgb(190, 40,  40),
-                shortcut:       Color::Rgb(60,  100, 180),
-                header_bg:      Color::Rgb(238, 236, 248),
-                gauge_filled:   Color::Rgb(200, 100, 20),
-                gauge_empty:    Color::Rgb(215, 212, 235),
+                bg:             Color::Rgb(248, 247, 255),
+                surface:        Color::Rgb(232, 230, 248),
+                nav_bg:         Color::Rgb(236, 234, 247),
+
+                panel_border:   Color::Rgb(74,  68,  186),
+                divider:        Color::Rgb(132, 126, 174),
+
+                text:           Color::Rgb(18,  15,  38),
+                text_muted:     Color::Rgb(70,  66,  102),
+                text_faint:     Color::Rgb(92,  88,  128),
+                nav_key:        Color::Rgb(155, 80,  0),
+
+                dl_primary:     Color::Rgb(182, 86,  12),
+                dl_dim:         Color::Rgb(168, 129, 93),
+                ul_primary:     Color::Rgb(22,  86,  180),
+                ul_dim:         Color::Rgb(116, 150, 198),
+
+                accent_green:   Color::Rgb(25,  150, 70),
+                accent_yellow:  Color::Rgb(175, 120, 0),
+                accent_red:     Color::Rgb(185, 35,  35),
+                accent_teal:    Color::Rgb(0,   140, 125),
+
+                pill_active_bg: Color::Rgb(195, 95,  15),
+                pill_done_fg:   Color::Rgb(248, 247, 255),
+                pill_done_bg:   Color::Rgb(25,  150, 70),
             },
         }
     }
 
-    pub fn download_color(&self) -> Color { self.accent_orange }
-    pub fn upload_color(&self)   -> Color { Color::Rgb(200, 200, 210) }
-
     pub fn latency_color(&self, ms: f64) -> Color {
-        if ms < 50.0        { Color::Rgb(80, 200, 120) }
-        else if ms < 100.0  { self.accent_yellow }
-        else if ms < 200.0  { Color::Rgb(255, 155, 40) }
-        else                { self.accent_red }
+        if ms < 20.0       { self.accent_green }
+        else if ms < 50.0  { self.accent_teal }
+        else if ms < 100.0 { self.accent_yellow }
+        else if ms < 200.0 { Color::Rgb(255, 160, 45) }
+        else               { self.accent_red }
+    }
+
+    pub fn quality_color(&self, grade: &str) -> Color {
+        match grade {
+            "S" => self.accent_green,
+            "A" => self.accent_teal,
+            "B" => self.accent_yellow,
+            "C" => Color::Rgb(255, 160, 45),
+            _   => self.accent_red,
+        }
     }
 }

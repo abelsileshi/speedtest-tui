@@ -11,8 +11,6 @@ struct IpApiResponse {
     isp: String,
     #[serde(default)]
     city: String,
-    #[serde(rename = "regionName", default)]
-    region_name: String,
     #[serde(default)]
     country: String,
     #[serde(default)]
@@ -20,7 +18,6 @@ struct IpApiResponse {
 }
 
 pub async fn fetch_ip_info(client: &Client) -> Result<(String, String, String)> {
-    // ip-api.com: free, no key, explicit isp field, works globally
     let resp = client
         .get("http://ip-api.com/json/?fields=status,country,regionName,city,isp,query")
         .timeout(std::time::Duration::from_secs(8))

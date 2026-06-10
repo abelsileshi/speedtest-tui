@@ -3,9 +3,10 @@ use reqwest::Client;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+
 use crate::app::events::NetworkMsg;
 
-const UPLOAD_SIZE: usize = 4_194_304; // 4MB per request
+const UPLOAD_SIZES: &[usize] = &[262_144, 524_288, 1_048_576, 4_194_304];
 
 pub async fn run_upload_test(
     client: Client,
@@ -26,8 +27,18 @@ pub async fn run_upload_test(
 
         let handle = tokio::spawn(async move {
             let worker_bytes = Arc::new(Mutex::new(0u64));
+            let _ = tx
+                .send(NetworkMsg::UploadSample {
+                    worker_id,
+                    mbps: 0.0,
+                    aggregate_mbps: 0.0,
+                })
+                .await;
+
+            let mut chunk_idx = 0usize;
             while start.elapsed() < deadline {
-                let payload = vec![0u8; UPLOAD_SIZE];
+                let upload_size = UPLOAD_SIZES[chunk_idx.min(UPLOAD_SIZES.len() - 1)];
+                let payload = vec![0u8; upload_size];
                 if client
                     .post("https://speed.cloudflare.com/__up")
                     .body(payload)
@@ -36,7 +47,7 @@ pub async fn run_upload_test(
                     .await
                     .is_ok()
                 {
-                    let len = UPLOAD_SIZE as u64;
+                    let len = upload_size as u64;
                     { *total_bytes.lock().unwrap() += len; }
                     { *worker_bytes.lock().unwrap() += len; }
 
@@ -48,10 +59,13 @@ pub async fn run_upload_test(
 
                     let _ = tx.send(NetworkMsg::UploadSample {
                         worker_id,
-                        bytes: worker_total,
                         mbps: wmbps,
                         aggregate_mbps: agg,
                     }).await;
+
+                    if chunk_idx < UPLOAD_SIZES.len() - 1 {
+                        chunk_idx += 1;
+                    }
                 }
             }
         });

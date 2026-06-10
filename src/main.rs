@@ -8,7 +8,7 @@ mod ui;
 use anyhow::Result;
 use app::{
     events::NetworkMsg,
-    state::{AppState, Phase, Theme, WorkerState},
+    state::{AppState, Phase, Theme, WorkerState, DASHBOARD_HISTORY_STEP, DASHBOARD_HISTORY_WINDOW},
 };
 use chrono::Utc;
 use clap::Parser;
@@ -46,13 +46,11 @@ async fn main() -> Result<()> {
     result
 }
 
-/// Outer loop: supports full restart via [r]
 async fn run_app(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     cli:      &Cli,
     config:   &config::Config,
 ) -> Result<()> {
-    // Persist theme across restarts
     let mut current_theme = match &cli.theme {
         Some(ThemeArg::Dark)  => Theme::Dark,
         Some(ThemeArg::Light) => Theme::Light,
@@ -71,7 +69,6 @@ async fn run_app(
 
         let action = run_single_test(terminal, &mut state, cli, config).await?;
 
-        // Carry theme over to next run
         current_theme = state.theme.clone();
 
         match action {
@@ -103,19 +100,16 @@ async fn run_single_test(
     let ping_count  = config.ping_count;
     let skip_upload = cli.no_upload;
 
-    // ── Spawn background networking ──────────────────────────────
     let net_client = client.clone();
     let net_tx     = tx.clone();
     tokio::spawn(async move {
-        // IP info
         match network::server::fetch_ip_info(&net_client).await {
             Ok((ip, isp, loc)) => {
                 let _ = net_tx.send(NetworkMsg::IpInfoReceived {
                     ip, isp, location: loc,
                 }).await;
             }
-            Err(e) => {
-                // Still proceed; show error in status
+            Err(_) => {
                 let _ = net_tx.send(NetworkMsg::IpInfoReceived {
                     ip:       "Unavailable".into(),
                     isp:      "ISP lookup unavailable".into(),
@@ -124,7 +118,6 @@ async fn run_single_test(
             }
         }
 
-        // Server selection
         let mut servers  = network::server::get_server_list();
         let best_idx     = network::server::select_best_server(
             &net_client, &mut servers, &preferred,
@@ -134,17 +127,14 @@ async fn run_single_test(
             .unwrap_or_else(|| "speed.cloudflare.com".into());
         let _ = net_tx.send(NetworkMsg::ServersReceived(servers)).await;
 
-        // Ping
         let _ = network::ping::run_ping_test(
             net_client.clone(), best_host.clone(), ping_count, net_tx.clone(),
         ).await;
 
-        // Download
         let _ = network::download::run_download_test(
             net_client.clone(), num_workers, duration, net_tx.clone(),
         ).await;
 
-        // Upload
         if !skip_upload {
             let _ = network::upload::run_upload_test(
                 net_client.clone(), num_workers, duration, net_tx.clone(),
@@ -156,7 +146,6 @@ async fn run_single_test(
     let mut last  = Instant::now();
 
     loop {
-        // Drain network messages
         while let Ok(msg) = rx.try_recv() {
             handle_network_msg(state, msg);
         }
@@ -168,10 +157,8 @@ async fn run_single_test(
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
-                        // ── Quit ────────────────────────────────
                         KeyCode::Char('q') | KeyCode::Esc => {
                             if matches!(state.phase, Phase::History | Phase::Help) {
-                                // go back to main view
                                 state.phase = if state.result.is_some() {
                                     Phase::Results
                                 } else {
@@ -187,30 +174,21 @@ async fn run_single_test(
                             return Ok(Action::Quit);
                         }
 
-                        // ── Restart ─────────────────────────────
                         KeyCode::Char('r') => {
                             return Ok(Action::Restart);
                         }
-
-                        // ── Theme toggle ─────────────────────────
                         KeyCode::Char('t') => {
                             state.theme = match state.theme {
                                 Theme::Dark  => Theme::Light,
                                 Theme::Light => Theme::Dark,
                             };
                         }
-
-                        // ── History ──────────────────────────────
                         KeyCode::Char('h') => {
                             state.phase = Phase::History;
                         }
-
-                        // ── Help ─────────────────────────────────
                         KeyCode::Char('?') => {
                             state.phase = Phase::Help;
                         }
-
-                        // ── Export ───────────────────────────────
                         KeyCode::Char('e') => {
                             if let Some(ref r) = state.result.clone() {
                                 let _ = storage::export::export_result(
@@ -218,8 +196,6 @@ async fn run_single_test(
                                 );
                             }
                         }
-
-                        // ── History scroll ────────────────────────
                         KeyCode::Up => {
                             if matches!(state.phase, Phase::History) {
                                 state.history_scroll =
@@ -232,8 +208,43 @@ async fn run_single_test(
                                     .min(state.history.len().saturating_sub(1));
                             }
                         }
-
-                        // ── Close help on any other key ───────────
+                        KeyCode::Left => {
+                            if !matches!(state.phase, Phase::History | Phase::Help) {
+                                let newest_start = state.history.len().saturating_sub(DASHBOARD_HISTORY_WINDOW);
+                                let current_start = if state.history_graph_follow_newest {
+                                    newest_start
+                                } else {
+                                    state.history_graph_start.min(newest_start)
+                                };
+                                state.history_graph_follow_newest = false;
+                                state.history_graph_start =
+                                    current_start.saturating_sub(DASHBOARD_HISTORY_STEP);
+                            }
+                        }
+                        KeyCode::Right => {
+                            if !matches!(state.phase, Phase::History | Phase::Help) {
+                                let newest_start = state.history.len().saturating_sub(DASHBOARD_HISTORY_WINDOW);
+                                let current_start = if state.history_graph_follow_newest {
+                                    newest_start
+                                } else {
+                                    state.history_graph_start.min(newest_start)
+                                };
+                                let next_start = (current_start + DASHBOARD_HISTORY_STEP).min(newest_start);
+                                state.history_graph_start = next_start;
+                                state.history_graph_follow_newest = next_start >= newest_start;
+                            }
+                        }
+                        KeyCode::Home => {
+                            if !matches!(state.phase, Phase::History | Phase::Help) {
+                                state.history_graph_start = 0;
+                                state.history_graph_follow_newest = false;
+                            }
+                        }
+                        KeyCode::End => {
+                            if !matches!(state.phase, Phase::History | Phase::Help) {
+                                state.history_graph_follow_newest = true;
+                            }
+                        }
                         _ => {
                             if matches!(state.phase, Phase::Help) {
                                 state.phase = Phase::Results;
@@ -250,8 +261,6 @@ async fn run_single_test(
         }
     }
 }
-
-// ── Network message handler ───────────────────────────────────────────────────
 
 fn handle_network_msg(state: &mut AppState, msg: NetworkMsg) {
     match msg {
@@ -270,18 +279,22 @@ fn handle_network_msg(state: &mut AppState, msg: NetworkMsg) {
         }
         NetworkMsg::PingComplete => {
             state.phase = Phase::Download;
-            state.download.workers = (0..8)
-                .map(|i| WorkerState { id: i, active: true, ..Default::default() })
+            state.download.workers = std::iter::repeat_with(|| WorkerState {
+                active: true,
+                ..Default::default()
+            })
+                .take(8)
                 .collect();
         }
-        NetworkMsg::DownloadSample { worker_id, bytes, mbps, aggregate_mbps } => {
+        NetworkMsg::DownloadSample { worker_id, mbps, aggregate_mbps } => {
             state.download.current_mbps = aggregate_mbps;
             if aggregate_mbps > state.download.peak_mbps {
                 state.download.peak_mbps = aggregate_mbps;
             }
             app::metrics::update_speed_history(&mut state.download.history, aggregate_mbps);
             if let Some(w) = state.download.workers.get_mut(worker_id) {
-                w.speed_mbps = mbps; w.bytes_transferred = bytes; w.active = true;
+                w.speed_mbps = mbps;
+                w.active = true;
             }
         }
         NetworkMsg::DownloadComplete(avg) => {
@@ -291,21 +304,25 @@ fn handle_network_msg(state: &mut AppState, msg: NetworkMsg) {
             }
             if !state.skip_upload {
                 state.phase = Phase::Upload;
-                state.upload.workers = (0..8)
-                    .map(|i| WorkerState { id: i, active: true, ..Default::default() })
+                state.upload.workers = std::iter::repeat_with(|| WorkerState {
+                    active: true,
+                    ..Default::default()
+                })
+                    .take(8)
                     .collect();
             } else {
                 finalize_result(state);
             }
         }
-        NetworkMsg::UploadSample { worker_id, bytes, mbps, aggregate_mbps } => {
+        NetworkMsg::UploadSample { worker_id, mbps, aggregate_mbps } => {
             state.upload.current_mbps = aggregate_mbps;
             if aggregate_mbps > state.upload.peak_mbps {
                 state.upload.peak_mbps = aggregate_mbps;
             }
             app::metrics::update_speed_history(&mut state.upload.history, aggregate_mbps);
             if let Some(w) = state.upload.workers.get_mut(worker_id) {
-                w.speed_mbps = mbps; w.bytes_transferred = bytes; w.active = true;
+                w.speed_mbps = mbps;
+                w.active = true;
             }
         }
         NetworkMsg::UploadComplete(avg) => {
@@ -314,9 +331,6 @@ fn handle_network_msg(state: &mut AppState, msg: NetworkMsg) {
                 w.active = false; w.complete = true;
             }
             finalize_result(state);
-        }
-        NetworkMsg::Error(e) => {
-            state.phase = Phase::Error(e);
         }
     }
 }
@@ -340,11 +354,11 @@ fn finalize_result(state: &mut AppState) {
         quality_grade:   grade,
     };
     let _ = storage::history::append_result(&result);
+    state.history.push(result.clone());
+    state.history_graph_follow_newest = true;
     state.result = Some(result);
     state.phase  = Phase::Results;
 }
-
-// ── Quiet mode ────────────────────────────────────────────────────────────────
 
 async fn run_quiet(cli: &Cli, config: &config::Config) -> Result<()> {
     let client = reqwest::Client::builder()
