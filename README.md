@@ -33,7 +33,7 @@ It runs ping, download, and upload checks against Cloudflare endpoints and prese
 - A Unicode-capable terminal with 256-color support
 - Internet access to:
   - `speed.cloudflare.com`
-  - `ip-api.com`
+  - `ipwho.is`
 
 ## Installation
 
@@ -118,7 +118,7 @@ From the current binary:
 |---|---|---|
 | `--server <ID>` | `-s` | Use a specific test server ID |
 | `--no-upload` | `-n` | Skip the upload phase |
-| `--quiet` | `-q` | Run without the TUI and print JSON on exit |
+| `--quiet` | `-q` | Run without the TUI and print JSON on exit; currently skips ping and quality scoring |
 | `--export <FORMAT>` | `-e` | Export results as `json`, `csv`, or `png` |
 | `--theme <THEME>` | `-t` | Force `dark` or `light` theme at launch |
 | `--help` | `-h` | Print help |
@@ -248,6 +248,13 @@ speedtest-tui --quiet | jq
 ```
 
 The current quiet-mode implementation is intended for automation and file export. It does not render live charts or the interactive dashboard.
+
+Current quiet-mode limitations:
+
+- it skips the ping phase
+- `ping_ms`, `jitter_ms`, and `packet_loss_pct` are emitted as `0.0`
+- `quality_score` is emitted as `0.0`
+- `quality_grade` is emitted as `N/A`
 
 ## Result Format
 
@@ -382,7 +389,7 @@ src/
 
 | Purpose | Endpoint |
 |---|---|
-| IP / ISP lookup | `http://ip-api.com/json/?fields=status,country,regionName,city,isp,query` |
+| IP / ISP lookup | `https://ipwho.is/` |
 | Server latency probe | `https://<host>/cdn-cgi/trace` |
 | Download test | `https://speed.cloudflare.com/__down?bytes=<size>` |
 | Upload test | `https://speed.cloudflare.com/__up` |
@@ -408,7 +415,7 @@ RUST_LOG=debug cargo run 2>debug.log
 
 ### Why does the app sometimes show `Unknown ISP` or `Unknown location`?
 
-The speed test continues even if the IP/ISP lookup fails. In that case the UI falls back to neutral placeholders instead of treating it as a hard error.
+The speed test continues even if the IP/ISP lookup fails. In that case the UI falls back to neutral placeholders instead of treating it as a hard error. The current implementation also honors `Retry-After` when `ipwho.is` rate-limits requests, so it stops retrying until the cooldown expires.
 
 ### Why is my quality grade lower than expected?
 

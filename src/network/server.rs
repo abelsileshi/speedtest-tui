@@ -1,38 +1,114 @@
 use crate::app::state::ServerInfo;
 use anyhow::Result;
-use reqwest::Client;
+use reqwest::{header::RETRY_AFTER, Client, StatusCode};
 use serde::Deserialize;
+use std::{
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
+};
 
-#[derive(Debug, Deserialize)]
-struct IpApiResponse {
-    #[serde(default)]
-    query: String,
+const IPWHOIS_URL: &str = "https://ipwho.is/";
+const IP_LOOKUP_TIMEOUT: Duration = Duration::from_secs(8);
+const RATE_LIMIT_FALLBACK: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Default, Deserialize)]
+struct IpWhoIsConnection {
     #[serde(default)]
     isp: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct IpWhoIsResponse {
+    #[serde(default)]
+    ip: String,
+    #[serde(default)]
+    success: bool,
+    #[serde(default)]
+    message: String,
     #[serde(default)]
     city: String,
     #[serde(default)]
     country: String,
     #[serde(default)]
-    status: String,
+    connection: IpWhoIsConnection,
+}
+
+fn ip_lookup_cooldown() -> &'static Mutex<Option<Instant>> {
+    static COOLDOWN: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    COOLDOWN.get_or_init(|| Mutex::new(None))
+}
+
+fn parse_retry_after_seconds(value: Option<&reqwest::header::HeaderValue>) -> Option<u64> {
+    value
+        .and_then(|header| header.to_str().ok())
+        .and_then(|text| text.trim().parse::<u64>().ok())
+}
+
+fn format_location(city: &str, country: &str) -> String {
+    match (city.trim(), country.trim()) {
+        ("", "") => "Unknown location".into(),
+        ("", country) => country.to_string(),
+        (city, "") => city.to_string(),
+        (city, country) => format!("{}, {}", city, country),
+    }
 }
 
 pub async fn fetch_ip_info(client: &Client) -> Result<(String, String, String)> {
-    let resp = client
-        .get("http://ip-api.com/json/?fields=status,country,regionName,city,isp,query")
-        .timeout(std::time::Duration::from_secs(8))
-        .send()
-        .await?
-        .json::<IpApiResponse>()
-        .await?;
-
-    if resp.status != "success" {
-        anyhow::bail!("ip-api returned non-success");
+    {
+        let now = Instant::now();
+        let mut cooldown = ip_lookup_cooldown()
+            .lock()
+            .expect("ip lookup cooldown mutex poisoned");
+        if let Some(until) = *cooldown {
+            if now < until {
+                let wait = until.saturating_duration_since(now).as_secs().max(1);
+                anyhow::bail!("ipwho.is cooldown active for {} more seconds", wait);
+            }
+            *cooldown = None;
+        }
     }
 
-    let ip       = if resp.query.is_empty()       { "Unknown".into() } else { resp.query };
-    let isp      = if resp.isp.is_empty()          { "Unknown ISP".into() } else { resp.isp };
-    let location = format!("{}, {}", resp.city, resp.country);
+    let response = client
+        .get(IPWHOIS_URL)
+        .timeout(IP_LOOKUP_TIMEOUT)
+        .send()
+        .await?;
+
+    if response.status() == StatusCode::TOO_MANY_REQUESTS {
+        let retry_after = parse_retry_after_seconds(response.headers().get(RETRY_AFTER))
+            .map(Duration::from_secs)
+            .unwrap_or(RATE_LIMIT_FALLBACK);
+        let wait_secs = retry_after.as_secs().max(1);
+        let mut cooldown = ip_lookup_cooldown()
+            .lock()
+            .expect("ip lookup cooldown mutex poisoned");
+        *cooldown = Some(Instant::now() + retry_after);
+        anyhow::bail!("ipwho.is rate limit reached; retry after {} seconds", wait_secs);
+    }
+
+    let response = response.error_for_status()?;
+    let resp = response.json::<IpWhoIsResponse>().await?;
+
+    if !resp.success {
+        let message = if resp.message.trim().is_empty() {
+            "ipwho.is returned an unsuccessful response"
+        } else {
+            resp.message.trim()
+        };
+        anyhow::bail!(message.to_string());
+    }
+
+    let ip = if resp.ip.trim().is_empty() {
+        "Unknown".into()
+    } else {
+        resp.ip
+    };
+    let isp = if resp.connection.isp.trim().is_empty() {
+        "Unknown ISP".into()
+    } else {
+        resp.connection.isp
+    };
+    let location = format_location(&resp.city, &resp.country);
 
     Ok((ip, isp, location))
 }
@@ -44,13 +120,6 @@ pub fn get_server_list() -> Vec<ServerInfo> {
             name: "Cloudflare".into(),
             host: "speed.cloudflare.com".into(),
             location: "Global Anycast".into(),
-            latency_ms: 0.0,
-        },
-        ServerInfo {
-            id: "2".into(),
-            name: "Cloudflare EU".into(),
-            host: "speed.cloudflare.com".into(),
-            location: "Global".into(),
             latency_ms: 0.0,
         },
     ]
