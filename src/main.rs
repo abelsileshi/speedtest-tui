@@ -390,7 +390,7 @@ async fn run_quiet(cli: &Cli, config: &config::Config) -> Result<()> {
 
     let (ip, isp, location) = network::server::fetch_ip_info(&client)
         .await
-        .unwrap_or_else(|_| ("Unknown".into(), "Unknown".into(), "Unknown".into()));
+        .unwrap_or_else(|_| ("Unknown".into(), "Unknown ISP".into(), "Unknown location".into()));
 
     let mut servers = network::server::get_server_list();
     let best_idx    = network::server::select_best_server(
